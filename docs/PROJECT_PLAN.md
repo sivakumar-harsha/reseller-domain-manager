@@ -1,7 +1,9 @@
 # ResellerClub Domain Manager — Project Plan
 
-Status: Phase 0 (planning and repository initialisation). Nothing is implemented yet.
+Status: Phase 3 database foundation COMPLETE (`sync_runs` and `domains` migrations, strict SQL mode; isolated schema tests passed: 11 tests, 52 assertions, 0 skipped). Note: this "Phase 3" is the working label for the database-foundation step, which belongs to Phase 1 and 2 in the table in section 7; the table's own Phase 3 is the Flutter app. Backend authentication is implemented and tested locally (see `AUTHENTICATION.md`; migrations for `users` and `refresh_tokens` not yet applied to the development database). Sync service and app are not implemented yet.
 Last updated: 2026-10-27
+
+Note: the phase numbers in section 7 are the original plan; the work sessions have so far been numbered separately (session phases 1 to 3 covered the skeleton, local database setup and the two migrations below).
 
 Items marked **VERIFY** come from general knowledge of the ResellerClub API and must be confirmed against the official documentation before use.
 
@@ -51,14 +53,29 @@ MariaDB 10.4.32, InnoDB, utf8mb4. All instants stored in UTC.
 
 - `users`: id, email (unique), password_hash, totp_secret_enc (nullable), is_active, failed_logins, locked_until, timestamps. Exactly one owner row, created by a CLI command.
 - `refresh_tokens`: id, user_id, token_hash, family_id, device_label, expires_at, revoked_at, last_used_at.
-- `domains`: id, rc_order_id (unique), domain_name (unique, lowercase), rc_customer_id, status, registered_at, expires_at, auto_renew, privacy_enabled, registrar_lock, nameservers_json, content_hash, first_seen_at, last_synced_at, last_seen_sync_id, is_missing, timestamps. Indexes on expires_at, status, domain_name.
-- `sync_runs`: id, trigger (manual/scheduled), status (running/success/partial/failed), started_at, finished_at, pages_fetched, records_seen, inserted, updated, unchanged, error_count, error_summary.
+- `domains` (IMPLEMENTED, migration `2026-10-27-120100_CreateDomains`): local cache of the domain inventory; ResellerClub stays authoritative. Columns: id, rc_order_id (unique), domain_name (unique, case-insensitive collation; lowercase is an application rule), rc_customer_id, status, registered_at, expires_at, auto_renew, privacy_enabled, registrar_lock, nameservers_json, content_hash, first_seen_at, last_synced_at, last_seen_sync_id, is_missing, timestamps. Provider-derived columns are nullable (NULL = unknown); their names and meanings are NOT yet verified against official ResellerClub responses. Indexes on expires_at, status; unique keys cover rc_order_id and domain_name. `last_seen_sync_id` is a foreign key to `sync_runs.id` with ON DELETE SET NULL, so pruning old runs keeps the domain rows.
+- `sync_runs` (IMPLEMENTED, migration `2026-10-27-120000_CreateSyncRuns`): one row per read-only synchronisation attempt, as history and audit. Columns: id, `trigger_type` (manual/scheduled; named `trigger_type` instead of the earlier plan's `trigger`, to avoid the SQL keyword TRIGGER), status (running/success/partial/failed, default running), started_at, finished_at (nullable), pages_fetched, records_seen, inserted, updated, unchanged, error_count (unsigned counters, default 0), error_summary (nullable, sanitised), timestamps. Indexes on started_at, status.
 - `sync_errors`: id, sync_run_id, scope, http_status, error_code, message (sanitised), retryable, created_at.
 - `device_tokens` and `notification_log`: unique key on (domain_id, expiry_date, lead_days) so each reminder is sent once.
 - `audit_log`: id, user_id, action, target, ip, created_at.
 - Renewal phase only: `renewal_requests` (see section 9).
 
 Raw provider payloads are stored only if explicitly approved (decision D7), and never with credentials.
+
+### 4.1 Strict SQL mode
+
+`backend/app/Config/Database.php` sets `strictOn = true` on the default connection, so each connection adds `STRICT_ALL_TABLES` to the session `sql_mode`. The local MariaDB server default is non-strict, and without this change invalid ENUM values, NULL in NOT NULL columns and over-long strings would be silently coerced or truncated. Practical implications:
+- A provider value longer than its column (for example `status` over 64 characters or `domain_name` over 253) makes the INSERT/UPDATE fail instead of being truncated. The sync code must validate or deliberately truncate and record the problem.
+- It applies to every connection through the default group, including any future production connection.
+- It is a per-session setting and does not change the server configuration.
+
+### 4.2 Open design decisions for the synchronisation phase
+
+These are NOT resolved. They must be decided and recorded before the sync service is written.
+- **Overlapping runs and abandoned `running` records.** The schema has no lock and no constraint tying `status` to `finished_at`. Decide how to prevent a manual and a scheduled run overlapping (for example a database lock or a single-active-run check) and how to treat a `running` row left behind by a crash (for example mark it `failed` after a timeout, before starting a new run).
+- **Definitive domain upsert key.** Both `rc_order_id` and `domain_name` are unique. Which one identifies a domain, and what happens when a domain is transferred, re-registered or renamed under a new order ID, depends on how the official ResellerClub API responses behave. Pending verification against the official documentation and real responses; until then neither is declared the key.
+- **Missing-domain detection when `last_seen_sync_id` is NULL.** `ON DELETE SET NULL` clears the pointer when old runs are pruned, and `NULL <> run_id` evaluates to NULL, not true, so a naive `last_seen_sync_id <> :current` filter would skip those rows. Detection must handle NULL explicitly (for example `last_seen_sync_id IS NULL OR last_seen_sync_id <> :current`, or a null-safe comparison) or rely on other fields, and only run after a successful complete sync.
+- **Meaning of `last_synced_at`.** It is set per row when that row is fetched, so a row touched by a run that later fails or is partial still has a fresh value. Define what the UI means by "last synced" before building it.
 
 ## 5. Authentication and security
 
@@ -139,7 +156,9 @@ Decisions needing approval:
 - D5: RESOLVED. TOTP is optional for now and may be added later.
 - D6: Notification lead times and display time zone (default assumption Asia/Kolkata).
 - D7: Store full raw provider JSON or selected fields only.
-- D8: Database name `reseller_domain_manager` approved. The dedicated least-privilege user and SQL await approval (see `LOCAL_SETUP.md`).
+- D8: Database `reseller_domain_manager` and the dedicated least-privilege user were created locally (see `LOCAL_SETUP.md`).
+- D9: Open. Sync-phase decisions listed in section 4.2 (overlap and stale runs, upsert key, NULL-safe missing detection, meaning of `last_synced_at`).
+- D10: RESOLVED. The isolated `reseller_domain_manager_test` database and a dedicated user were created by the owner. `tests/database` ran against it: 11 tests, 52 assertions, 0 failures, 0 skipped (see `LOCAL_SETUP.md`).
 
 Risks:
 - The ResellerClub API detail is unverified: rate limits, page-size limits, field names, IP whitelisting and renewal behaviour.

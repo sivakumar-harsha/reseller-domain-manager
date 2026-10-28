@@ -9,4 +9,10 @@ use CodeIgniter\Router\RouteCollection;
  */
 $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static function (RouteCollection $routes): void {
     $routes->get('health', 'HealthController::index');
+
+    // No registration route exists: the owner is created with `php spark auth:create-owner`.
+    $routes->post('auth/login', 'AuthController::login', ['filter' => 'throttle:login']);
+    $routes->post('auth/refresh', 'AuthController::refresh', ['filter' => 'throttle:refresh']);
+    $routes->post('auth/logout', 'AuthController::logout', ['filter' => 'throttle:logout']);
+    $routes->get('auth/me', 'AuthController::me', ['filter' => 'auth']);
 });
