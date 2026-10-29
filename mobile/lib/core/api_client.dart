@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../domains/domain.dart';
 import 'config.dart';
 
 class ApiException implements Exception {
@@ -31,6 +32,13 @@ class User {
   final String email;
 }
 
+/// Supplies a valid access token to authenticated calls and handles an expired
+/// one: [run] calls [call] with the current token and, on HTTP 401, retries it
+/// at most once with a refreshed token.
+abstract class SessionAuthorizer {
+  Future<T> run<T>(Future<T> Function(String accessToken) call);
+}
+
 /// Thin JSON client for the backend auth endpoints. Never logs bodies or tokens.
 class ApiClient {
   ApiClient({http.Client? client, String baseUrl = apiBaseUrl})
@@ -39,6 +47,29 @@ class ApiClient {
 
   final http.Client _client;
   final String _base;
+
+  /// Set by the auth controller; required for authenticated data calls.
+  SessionAuthorizer? authorizer;
+
+  /// `GET domains`. An empty or blank [q] is not sent.
+  Future<DomainPage> listDomains(
+      {String? q, int page = 1, int perPage = 20}) {
+    final auth = authorizer;
+    if (auth == null) return Future.error(ApiException(401, 'unauthorized'));
+    final term = q?.trim() ?? '';
+    return auth.run((token) async {
+      final json = await _send('GET', 'domains', accessToken: token, query: {
+        if (term.isNotEmpty) 'q': term,
+        'page': '$page',
+        'per_page': '$perPage',
+      });
+      try {
+        return DomainPage.fromJson(json);
+      } on FormatException {
+        throw ApiException(500, 'bad_response');
+      }
+    });
+  }
 
   Future<TokenPair> login(String email, String password) async {
     final json = await _send('POST', 'auth/login', body: {
@@ -84,8 +115,11 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? body,
     String? accessToken,
+    Map<String, String>? query,
   }) async {
-    final request = http.Request(method, Uri.parse('$_base$path'))
+    final uri = Uri.parse('$_base$path');
+    final request = http.Request(
+        method, query == null ? uri : uri.replace(queryParameters: query))
       ..headers['Accept'] = 'application/json';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
@@ -106,7 +140,12 @@ class ApiClient {
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return const {};
-      final decoded = jsonDecode(response.body);
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(response.body);
+      } on FormatException {
+        throw ApiException(500, 'bad_response');
+      }
       return decoded is Map<String, dynamic> ? decoded : const {};
     }
 

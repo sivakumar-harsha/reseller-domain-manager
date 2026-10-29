@@ -15,4 +15,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     $routes->post('auth/refresh', 'AuthController::refresh', ['filter' => 'throttle:refresh']);
     $routes->post('auth/logout', 'AuthController::logout', ['filter' => 'throttle:logout']);
     $routes->get('auth/me', 'AuthController::me', ['filter' => 'auth']);
+
+    $routes->get('domains', 'DomainController::index', ['filter' => 'auth']);
+    $routes->get('domains/(:num)', 'DomainController::show/$1', ['filter' => 'auth']);
 });
