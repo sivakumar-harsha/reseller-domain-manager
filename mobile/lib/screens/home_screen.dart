@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_controller.dart';
 import '../domains/domain_controller.dart';
+import '../domains/domain.dart';
+import 'domain_detail_screen.dart';
 import 'domain_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -32,6 +34,17 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  void _open(Domain domain) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => DomainDetailScreen(
+        api: widget.auth.api,
+        auth: widget.auth,
+        domainId: domain.id,
+        title: domain.domainName,
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -45,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: DomainListScreen(controller: _domains),
+      body: DomainListScreen(controller: _domains, onOpen: _open),
     );
   }
 }

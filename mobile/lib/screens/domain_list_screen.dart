@@ -6,9 +6,13 @@ import '../domains/domain_controller.dart';
 /// Read-only list of cached domains with search, pull-to-refresh and
 /// load-more. Owns no state beyond the scroll position and search box.
 class DomainListScreen extends StatefulWidget {
-  const DomainListScreen({super.key, required this.controller, this.now});
+  const DomainListScreen(
+      {super.key, required this.controller, this.onOpen, this.now});
 
   final DomainController controller;
+
+  /// Called when a row is tapped; rows are not tappable when null.
+  final void Function(Domain domain)? onOpen;
 
   /// Clock override for tests.
   final DateTime Function()? now;
@@ -133,7 +137,12 @@ class _DomainListScreenState extends State<DomainListScreen> {
           if (i < header.length) return header[i];
           final index = i - header.length;
           if (index < _c.items.length) {
-            return _DomainTile(domain: _c.items[index], now: now);
+            final domain = _c.items[index];
+            return _DomainTile(
+              domain: domain,
+              now: now,
+              onTap: widget.onOpen == null ? null : () => widget.onOpen!(domain),
+            );
           }
           return _footer();
         },
@@ -167,16 +176,18 @@ class _DomainListScreenState extends State<DomainListScreen> {
 }
 
 class _DomainTile extends StatelessWidget {
-  const _DomainTile({required this.domain, required this.now});
+  const _DomainTile({required this.domain, required this.now, this.onTap});
 
   final Domain domain;
   final DateTime now;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final expired = domain.expiresAt != null && domain.expiresAt!.isBefore(now);
     return ListTile(
+      onTap: onTap,
       title: Text(domain.domainName),
       subtitle: Text([
         domain.status ?? 'Status unknown',

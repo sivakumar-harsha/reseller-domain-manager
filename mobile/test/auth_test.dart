@@ -76,6 +76,56 @@ void main() {
     expect(storage.tokens?.refreshToken, 'r2');
   });
 
+  test('restore with a rejected refresh token signs out and clears tokens',
+      () async {
+    final storage = MemoryStorage()
+      ..tokens = const TokenPair(accessToken: 'old', refreshToken: 'r1');
+    final log = <String>[];
+    final auth = _controller(
+      MockClient((req) async {
+        log.add(req.url.path);
+        return _json(401, {'error': 'unauthorized'});
+      }),
+      storage,
+    );
+    await auth.restore();
+    expect(auth.status, AuthStatus.signedOut);
+    expect(auth.user, isNull);
+    expect(storage.tokens, isNull);
+    expect(auth.errorMessage, isNull);
+    // One me, one refresh: no retry loop after the rejection.
+    expect(log, ['/api/v1/auth/me', '/api/v1/auth/refresh']);
+  });
+
+  test('restore keeps tokens when the refresh fails with a server error',
+      () async {
+    final storage = MemoryStorage()
+      ..tokens = const TokenPair(accessToken: 'old', refreshToken: 'r1');
+    final auth = _controller(
+      MockClient((req) async => req.url.path.endsWith('auth/refresh')
+          ? _json(500, {'error': 'server_error'})
+          : _json(401, {'error': 'unauthorized'})),
+      storage,
+    );
+    await auth.restore();
+    expect(auth.status, AuthStatus.signedOut);
+    expect(storage.tokens?.refreshToken, 'r1');
+    expect(auth.errorMessage, contains('server_error'));
+  });
+
+  testWidgets('a rejected refresh at startup shows the login form',
+      (tester) async {
+    final storage = MemoryStorage()
+      ..tokens = const TokenPair(accessToken: 'old', refreshToken: 'r1');
+    final auth = _controller(
+        MockClient((_) async => _json(401, {'error': 'unauthorized'})),
+        storage);
+    await tester.runAsync(auth.restore);
+    await tester.pumpWidget(App(auth: auth));
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(storage.tokens, isNull);
+  });
+
   test('logout clears local tokens even if the server is unreachable',
       () async {
     final storage = MemoryStorage()

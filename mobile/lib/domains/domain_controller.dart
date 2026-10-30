@@ -71,7 +71,7 @@ class DomainController extends ChangeNotifier {
       _apply(page);
     } on ApiException catch (e) {
       if (_stale(gen)) return;
-      error = _message(e);
+      error = messageFor(e);
     } finally {
       if (!_stale(gen)) {
         loading = false;
@@ -99,7 +99,7 @@ class DomainController extends ChangeNotifier {
       _apply(page);
     } on ApiException catch (e) {
       if (_stale(gen)) return;
-      error = _message(e);
+      error = messageFor(e);
     } finally {
       if (!_stale(gen)) {
         refreshing = false;
@@ -129,7 +129,7 @@ class DomainController extends ChangeNotifier {
       _apply(page);
     } on ApiException catch (e) {
       if (_stale(gen)) return;
-      loadMoreError = _message(e);
+      loadMoreError = messageFor(e);
     } finally {
       if (!_stale(gen)) {
         loadingMore = false;
@@ -169,7 +169,8 @@ class DomainController extends ChangeNotifier {
     super.dispose();
   }
 
-  static String _message(ApiException e) {
+  /// User-facing text for a failed domain request, shared with the detail screen.
+  static String messageFor(ApiException e) {
     switch (e.code) {
       case 'network_error':
         return 'Cannot reach the server. Check the connection and try again.';

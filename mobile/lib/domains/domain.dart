@@ -108,6 +108,46 @@ class DomainPage {
   }
 }
 
+/// `GET /api/v1/domains/{id}`: the list fields plus provider references and
+/// history. Every nullable value stays null when the backend does not know it.
+class DomainDetail {
+  const DomainDetail({
+    required this.domain,
+    this.nameservers,
+    this.rcOrderId,
+    this.rcCustomerId,
+    this.registeredAt,
+    this.firstSeenAt,
+  });
+
+  final Domain domain;
+
+  /// Null when nameservers have not been synced; an empty list means the
+  /// backend returned none.
+  final List<String>? nameservers;
+  final String? rcOrderId;
+  final String? rcCustomerId;
+  final DateTime? registeredAt;
+  final DateTime? firstSeenAt;
+
+  /// Throws [FormatException] when `id` or `domain_name` is missing or invalid.
+  factory DomainDetail.fromJson(Map<String, dynamic> json) {
+    final domain = Domain.tryParse(json);
+    if (domain == null) throw const FormatException('bad domain detail');
+    final ns = json['nameservers'];
+    return DomainDetail(
+      domain: domain,
+      nameservers: ns is List ? ns.whereType<String>().toList() : null,
+      rcOrderId: _text(json['rc_order_id']),
+      rcCustomerId: _text(json['rc_customer_id']),
+      registeredAt: _date(json['registered_at']),
+      firstSeenAt: _date(json['first_seen_at']),
+    );
+  }
+}
+
+String? _text(Object? v) => v is String && v.isNotEmpty ? v : null;
+
 DateTime? _date(Object? v) => v is String ? DateTime.tryParse(v)?.toUtc() : null;
 
 /// Accepts real booleans and 0/1; anything else is "unknown".

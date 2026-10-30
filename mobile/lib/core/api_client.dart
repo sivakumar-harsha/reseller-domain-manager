@@ -71,6 +71,20 @@ class ApiClient {
     });
   }
 
+  /// `GET domains/{id}`. A 404 means the domain no longer exists.
+  Future<DomainDetail> getDomain(int id) {
+    final auth = authorizer;
+    if (auth == null) return Future.error(ApiException(401, 'unauthorized'));
+    return auth.run((token) async {
+      final json = await _send('GET', 'domains/$id', accessToken: token);
+      try {
+        return DomainDetail.fromJson(json);
+      } on FormatException {
+        throw ApiException(500, 'bad_response');
+      }
+    });
+  }
+
   Future<TokenPair> login(String email, String password) async {
     final json = await _send('POST', 'auth/login', body: {
       'email': email,
