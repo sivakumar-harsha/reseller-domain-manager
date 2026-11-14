@@ -1,3 +1,5 @@
+import 'expiry.dart';
+
 /// One row of `GET /api/v1/domains`. Provider-derived fields stay null when the
 /// backend does not know them; nothing is defaulted or invented.
 class Domain {
@@ -118,9 +120,18 @@ class DomainDetail {
     this.rcCustomerId,
     this.registeredAt,
     this.firstSeenAt,
+    this.detailsSyncedAt,
+    this.contacts = const {},
   });
 
   final Domain domain;
+
+  /// When contact details were last synchronised; null when never.
+  final DateTime? detailsSyncedAt;
+
+  /// Stored contacts by role (`registrant`, `admin`, `tech`, `billing`). A
+  /// role is absent when the backend has no contact for it.
+  final Map<String, ContactInfo> contacts;
 
   /// Null when nameservers have not been synced; an empty list means the
   /// backend returned none.
@@ -142,13 +153,99 @@ class DomainDetail {
       rcCustomerId: _text(json['rc_customer_id']),
       registeredAt: _date(json['registered_at']),
       firstSeenAt: _date(json['first_seen_at']),
+      detailsSyncedAt: _date(json['details_synced_at']),
+      contacts: _contacts(json['contacts']),
     );
+  }
+}
+
+Map<String, ContactInfo> _contacts(Object? json) {
+  if (json is! Map) return const {};
+  final out = <String, ContactInfo>{};
+  for (final role in contactRoles) {
+    final c = ContactInfo.tryParse(json[role]);
+    if (c != null) out[role] = c;
+  }
+  return out;
+}
+
+/// Contact roles in display order.
+const contactRoles = ['registrant', 'admin', 'tech', 'billing'];
+
+/// One stored contact. Every field is optional; blanks are normalised to null.
+class ContactInfo {
+  const ContactInfo({
+    this.name,
+    this.company,
+    this.email,
+    this.telCountryCode,
+    this.telNumber,
+    this.address1,
+    this.address2,
+    this.address3,
+    this.city,
+    this.state,
+    this.country,
+    this.postalCode,
+  });
+
+  final String? name,
+      company,
+      email,
+      telCountryCode,
+      telNumber,
+      address1,
+      address2,
+      address3,
+      city,
+      state,
+      country,
+      postalCode;
+
+  static ContactInfo? tryParse(Object? json) {
+    if (json is! Map) return null;
+    return ContactInfo(
+      name: _text(json['name']),
+      company: _text(json['company']),
+      email: _text(json['email']),
+      telCountryCode: _text(json['tel_country_code']),
+      telNumber: _text(json['tel_number']),
+      address1: _text(json['address1']),
+      address2: _text(json['address2']),
+      address3: _text(json['address3']),
+      city: _text(json['city']),
+      state: _text(json['state']),
+      country: _text(json['country']),
+      postalCode: _text(json['postal_code']),
+    );
+  }
+
+  /// "+CC number", or null when there is no number.
+  String? get telephone {
+    final number = telNumber;
+    if (number == null) return null;
+    final cc = telCountryCode;
+    return cc == null ? number : '+$cc $number';
+  }
+
+  /// Non-empty address lines, one per line.
+  String? get address {
+    final cityLine = [city, state, postalCode].whereType<String>().join(', ');
+    final lines = [
+      address1,
+      address2,
+      address3,
+      cityLine.isEmpty ? null : cityLine,
+      country,
+    ].whereType<String>();
+    return lines.isEmpty ? null : lines.join('\n');
   }
 }
 
 String? _text(Object? v) => v is String && v.isNotEmpty ? v : null;
 
-DateTime? _date(Object? v) => v is String ? DateTime.tryParse(v)?.toUtc() : null;
+DateTime? _date(Object? v) =>
+    v is String ? DateTime.tryParse(v)?.toUtc() : null;
 
 /// Accepts real booleans and 0/1; anything else is "unknown".
 bool? _flag(Object? v) {
@@ -174,16 +271,16 @@ String formatDateTime(DateTime utc) {
 /// "Expires 2026-12-01 (in 34 days)", "Expired 2026-01-01 (3 days ago)",
 /// or "Expiry unknown". Compares local calendar days.
 String describeExpiry(DateTime? expiresAt, DateTime now) {
+  final info = ExpiryInfo.of(expiresAt, now);
   if (expiresAt == null) return 'Expiry unknown';
-  final e = expiresAt.toLocal();
-  final n = now.toLocal();
-  final days = DateTime.utc(e.year, e.month, e.day)
-      .difference(DateTime.utc(n.year, n.month, n.day))
-      .inDays;
+  final days = info.daysRemaining!;
   final date = formatDate(expiresAt);
-  if (days > 1) return 'Expires $date (in $days days)';
-  if (days == 1) return 'Expires $date (tomorrow)';
-  if (days == 0) return 'Expires $date (today)';
-  if (days == -1) return 'Expired $date (yesterday)';
-  return 'Expired $date (${-days} days ago)';
+  return switch (info.status) {
+    ExpiryStatus.upcoming => 'Expires $date (in $days days)',
+    ExpiryStatus.tomorrow => 'Expires $date (tomorrow)',
+    ExpiryStatus.today => 'Expires $date (today)',
+    ExpiryStatus.expired when days == -1 => 'Expired $date (yesterday)',
+    ExpiryStatus.expired => 'Expired $date (${-days} days ago)',
+    ExpiryStatus.unknown => 'Expiry unknown',
+  };
 }

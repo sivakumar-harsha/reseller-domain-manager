@@ -13,6 +13,7 @@ use CodeIgniter\Database\MySQLi\Connection as MySQLiConnection;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\Database;
 use Config\ResellerClub as ResellerClubConfig;
+use Tests\Support\Libraries\IsolatedResellerClubConfig;
 use Tests\Support\Database\UsesIsolatedAuthDatabase;
 
 /**
@@ -86,7 +87,7 @@ final class DomainSyncServiceTest extends CIUnitTestCase
 
     private function service(int $pageSize = 2, bool $configured = true, ?BaseConnection $db = null): DomainSyncService
     {
-        $config              = new ResellerClubConfig();
+        $config              = IsolatedResellerClubConfig::make();
         $config->baseUrl     = $configured ? 'https://test.httpapi.example/api' : '';
         $config->authUserId  = '123456';
         $config->apiKey      = 'sentinel-api-key-never-store';

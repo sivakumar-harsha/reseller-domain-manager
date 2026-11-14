@@ -6,6 +6,7 @@ use App\Libraries\ResellerClub\ResellerClubClient;
 use App\Libraries\ResellerClub\ResellerClubException;
 use CodeIgniter\Test\CIUnitTestCase;
 use Config\ResellerClub as ResellerClubConfig;
+use Tests\Support\Libraries\IsolatedResellerClubConfig;
 
 /**
  * Client behaviour against a fake transport. No network access.
@@ -18,7 +19,7 @@ final class ResellerClubClientTest extends CIUnitTestCase
 
     private function config(array $overrides = []): ResellerClubConfig
     {
-        $c             = new ResellerClubConfig();
+        $c             = IsolatedResellerClubConfig::make();
         $c->baseUrl    = 'https://test.httpapi.example/api';
         $c->authUserId = '123456';
         $c->apiKey     = self::SECRET_KEY;

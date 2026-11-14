@@ -4,10 +4,20 @@ import 'app.dart';
 import 'auth/auth_controller.dart';
 import 'auth/token_storage.dart';
 import 'core/api_client.dart';
+import 'domains/auto_refresh.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final auth = AuthController(api: ApiClient(), storage: SecureTokenStorage())
+  final api = ApiClient();
+  final auth = AuthController(api: api, storage: SecureTokenStorage())
     ..restore();
-  runApp(App(auth: auth));
+  runApp(
+    App(
+      auth: auth,
+      autoRefresh: AutoRefreshController(
+        api: api,
+        store: SecureRefreshStampStore(),
+      ),
+    ),
+  );
 }

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
 import 'domain.dart';
+import 'expiry.dart';
 
 /// State for the read-only domain list: first load, debounced search,
 /// load-more pagination and refresh. Stale responses (an older search, or one
@@ -21,6 +22,20 @@ class DomainController extends ChangeNotifier {
 
   final List<Domain> items = [];
   String query = '';
+
+  /// Active list filter and sort; both combine with [query] and paging.
+  ExpiryFilter expiry = ExpiryFilter.all;
+  DomainSort sort = DomainSort.defaultOrder;
+
+  /// Latest expiry summary, or null until [loadSummary] succeeds. Kept when a
+  /// later reload fails, so the last known counts stay visible.
+  ExpirySummary? summary;
+  bool summaryLoading = false;
+
+  /// Set when the last [loadSummary] failed.
+  String? summaryError;
+  int _summaryGeneration = 0;
+
   int total = 0;
   int _page = 0;
   int _totalPages = 0;
@@ -66,7 +81,7 @@ class DomainController extends ChangeNotifier {
     _notify();
 
     try {
-      final page = await _api.listDomains(q: query, page: 1, perPage: perPage);
+      final page = await _fetch(1);
       if (_stale(gen)) return;
       _apply(page);
     } on ApiException catch (e) {
@@ -93,7 +108,7 @@ class DomainController extends ChangeNotifier {
     _notify();
 
     try {
-      final page = await _api.listDomains(q: query, page: 1, perPage: perPage);
+      final page = await _fetch(1);
       if (_stale(gen)) return;
       items.clear();
       _apply(page);
@@ -123,8 +138,7 @@ class DomainController extends ChangeNotifier {
     _notify();
 
     try {
-      final page =
-          await _api.listDomains(q: query, page: _page + 1, perPage: perPage);
+      final page = await _fetch(_page + 1);
       if (_stale(gen)) return;
       _apply(page);
     } on ApiException catch (e) {
@@ -138,6 +152,43 @@ class DomainController extends ChangeNotifier {
     }
   }
 
+  /// Changes the expiry filter and reloads from page 1 (search is kept).
+  Future<void> setExpiry(ExpiryFilter value) {
+    if (value == expiry) return Future.value();
+    expiry = value;
+    return load();
+  }
+
+  /// Changes the sort order and reloads from page 1 (search is kept).
+  Future<void> setSort(DomainSort value) {
+    if (value == sort) return Future.value();
+    sort = value;
+    return load();
+  }
+
+  /// Fetches the expiry summary. Independent of the list: a failure only sets
+  /// [summaryError] and never touches the loaded rows.
+  Future<void> loadSummary() async {
+    final gen = ++_summaryGeneration;
+    summaryLoading = true;
+    summaryError = null;
+    _notify();
+
+    try {
+      final result = await _api.expirySummary();
+      if (_disposed || gen != _summaryGeneration) return;
+      summary = result;
+    } on ApiException catch (e) {
+      if (_disposed || gen != _summaryGeneration) return;
+      summaryError = messageFor(e);
+    } finally {
+      if (!_disposed && gen == _summaryGeneration) {
+        summaryLoading = false;
+        _notify();
+      }
+    }
+  }
+
   /// Debounced: the request is made [debounce] after the last change.
   void setQuery(String value) {
     final next = value.trim();
@@ -146,6 +197,15 @@ class DomainController extends ChangeNotifier {
     _timer?.cancel();
     _timer = Timer(debounce, load);
   }
+
+  /// One list request with the current search, filter and sort.
+  Future<DomainPage> _fetch(int page) => _api.listDomains(
+    q: query,
+    page: page,
+    perPage: perPage,
+    expiry: expiry,
+    sort: sort,
+  );
 
   void _apply(DomainPage page) {
     final known = items.map((d) => d.id).toSet();

@@ -39,6 +39,16 @@ class Auth extends BaseConfig
         'login'   => 10,
         'refresh' => 30,
         'logout'  => 30,
+        'enrich'  => 10,
+        'enrich_batch' => 120,
+        'inventory_sync' => 6,
+        'balance' => 30,
+        'renewal_quote' => 30,
+        'renewal_batch_create' => 20,
+        'renewal_batch_read' => 120,
+        'renewal_reconcile' => 12,
+        'renewal_execute' => 5,
+        'renewal_debit_verify' => 20,
     ];
 
     /** Owner password length bounds in bytes (bcrypt ignores input after 72 bytes). */

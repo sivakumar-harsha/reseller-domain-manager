@@ -7,8 +7,8 @@ enum AuthStatus { unknown, signedOut, signedIn }
 
 class AuthController extends ChangeNotifier implements SessionAuthorizer {
   AuthController({required ApiClient api, required TokenStorage storage})
-      : _api = api,
-        _storage = storage {
+    : _api = api,
+      _storage = storage {
     api.authorizer = this;
   }
 
@@ -118,6 +118,28 @@ class AuthController extends ChangeNotifier implements SessionAuthorizer {
     }
   }
 
+  @override
+  Future<T> runOnce<T>(Future<T> Function(String accessToken) call) async {
+    final tokens = await _storage.read();
+    if (tokens == null) throw ApiException(401, 'unauthorized');
+
+    try {
+      return await call(tokens.accessToken);
+    } on ApiException catch (e) {
+      if (e.statusCode == 401) {
+        // The call is NOT repeated. Refresh the session so the user's next,
+        // manual action starts with a valid token. A failed refresh keeps the
+        // existing rules (a rejected refresh token ends the session).
+        try {
+          await _refreshAfter(tokens.accessToken);
+        } on ApiException {
+          // The original 401 is what the caller needs to see.
+        }
+      }
+      rethrow;
+    }
+  }
+
   /// Returns a usable access token after [staleAccess] was rejected. Callers
   /// are serialised; a caller arriving after another already refreshed reuses
   /// the stored pair instead of spending the refresh token a second time.
@@ -138,7 +160,8 @@ class AuthController extends ChangeNotifier implements SessionAuthorizer {
     } on ApiException catch (e) {
       // A definitive rejection ends the session. Offline, rate limiting and
       // server trouble keep the tokens so a later attempt can still work.
-      final rejected = e.statusCode >= 400 &&
+      final rejected =
+          e.statusCode >= 400 &&
           e.statusCode < 500 &&
           e.statusCode != 408 &&
           e.statusCode != 429;
